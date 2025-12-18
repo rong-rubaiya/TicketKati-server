@@ -32,6 +32,7 @@ async function run() {
     const ticketsCollection = db.collection('Alltickets');
     const bookingsCollection = db.collection('bookings');
     const transactionsCollection = db.collection('transactions');
+    const advertisementCollection = db.collection('advertisements');
 
     // -------------------------------
     // Get all tickets
@@ -370,6 +371,124 @@ app.get('/tickets/approved', async (req, res) => {
 });
 
 
+// Delete ticket
+app.delete('/tickets/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await ticketsCollection.deleteOne({ _id: new ObjectId(id) });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to delete ticket" });
+  }
+});
+
+
+
+// Update ticket by vendor
+app.put('/tickets/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updatedTicket = req.body;
+
+    // Prevent negative quantity
+    if (updatedTicket.quantity < 0) updatedTicket.quantity = 0;
+
+    // Keep original verificationStatus and createdAt if not provided
+    const existingTicket = await ticketsCollection.findOne({ _id: new ObjectId(id) });
+    if (!existingTicket) return res.status(404).json({ success: false, message: "Ticket not found" });
+
+    updatedTicket.verificationStatus = existingTicket.verificationStatus;
+    updatedTicket.createdAt = existingTicket.createdAt;
+
+    await ticketsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updatedTicket }
+    );
+
+    res.json({ success: true, ticket: updatedTicket });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Failed to update ticket" });
+  }
+});
+
+// Advertise / Unadvertise a ticket
+app.patch('/tickets/advertise/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { advertised } = req.body;
+
+    const ticket = await ticketsCollection.findOne({ _id: new ObjectId(id) });
+    if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
+
+    // Update advertised status in Alltickets
+    await ticketsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { advertised } }
+    );
+
+    if (advertised) {
+      // Add to advertisements collection if not exists
+      const exists = await advertisementCollection.findOne({ ticketId: ticket._id.toString() });
+      if (!exists) {
+        await advertisementCollection.insertOne({
+          ticketId: ticket._id.toString(),
+          title: ticket.title,
+          price: ticket.price,
+          transportType: ticket.transportType,
+          vendorName: ticket.vendorName,
+          image: ticket.image || "/images/placeholder.jpg",
+          perks: ticket.perks || [],
+          createdAt: new Date(),
+        });
+      }
+    } else {
+      // Remove from advertisements if unadvertised
+      await advertisementCollection.deleteOne({ ticketId: ticket._id.toString() });
+    }
+
+    res.json({ success: true, message: 'Ticket advertisement updated' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to update advertised status' });
+  }
+});
+
+
+app.delete('/advertisements/:ticketId', async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    // Remove from advertisement collection
+    await advertisementCollection.deleteOne({ ticketId });
+
+    // Also update advertised field in Alltickets
+    await ticketsCollection.updateOne(
+      { _id: new ObjectId(ticketId) },
+      { $set: { advertised: false } }
+    );
+
+    res.json({ success: true, message: 'Advertisement deleted' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to delete advertisement' });
+  }
+});
+
+app.get('/advertisements', async (req, res) => {
+  try {
+    const ads = await advertisementCollection.find().toArray();
+    res.json(ads);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to fetch advertisements' });
+  }
+});
+
+
+
+
     // -------------------------------
     // Register user/vendor
     app.post('/register', async (req, res) => {
@@ -410,6 +529,56 @@ app.get('/tickets/approved', async (req, res) => {
 
       return res.status(404).send({ error: 'User not found' });
     });
+
+
+    app.get('/users/all', async (req, res) => {
+  try {
+    const users = await usersCollection.find().toArray();
+    const vendors = await vendorsCollection.find().toArray();
+    const admins = await adminCollection.find().toArray();
+
+    const allUsers = [
+      ...users.map(u => ({ ...u, role: 'user' })),
+      ...vendors.map(v => ({ ...v, role: 'vendor' })),
+      ...admins.map(a => ({ ...a, role: 'admin' })),
+    ];
+
+    res.json(allUsers);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to fetch users' });
+  }
+});
+
+
+app.patch('/users/role/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+
+    // Find the user in all collections
+    let user = await usersCollection.findOne({ _id: new ObjectId(id) }) ||
+               await vendorsCollection.findOne({ _id: new ObjectId(id) }) ||
+               await adminCollection.findOne({ _id: new ObjectId(id) });
+
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Remove from old collection
+    await usersCollection.deleteOne({ _id: new ObjectId(id) });
+    await vendorsCollection.deleteOne({ _id: new ObjectId(id) });
+    await adminCollection.deleteOne({ _id: new ObjectId(id) });
+
+    // Insert into new collection based on role
+    if (role === 'user') await usersCollection.insertOne(user);
+    else if (role === 'vendor') await vendorsCollection.insertOne(user);
+    else if (role === 'admin') await adminCollection.insertOne(user);
+
+    res.json({ success: true, user });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to update role' });
+  }
+});
 
   } finally {
     // optional: client.close();
