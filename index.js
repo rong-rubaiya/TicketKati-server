@@ -602,6 +602,23 @@ app.patch('/users/role/:id', async (req, res) => {
   }
 });
 
+
+// Get latest tickets (max 8)
+app.get('/latest-tickets', async (req, res) => {
+  try {
+    const latestTickets = await ticketsCollection
+      .find()                     // সব ticket
+      .sort({ createdAt: -1 })    // descending order by createdAt
+      .limit(8)                   // সর্বোচ্চ ৮টি
+      .toArray();
+
+    res.json(latestTickets);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to fetch latest tickets" });
+  }
+});
+
   } finally {
     // optional: client.close();
   }
