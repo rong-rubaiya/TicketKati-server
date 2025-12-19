@@ -550,6 +550,28 @@ app.get('/advertisements', async (req, res) => {
   }
 });
 
+app.patch('/users/fraud/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // vendor 
+    const vendor = await vendorsCollection.findOne({ _id: new ObjectId(id) });
+    if (!vendor) {
+      return res.status(404).json({ message: 'Vendor not found' });
+    }
+
+    await vendorsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { isFraud: true } }
+    );
+
+    res.json({ success: true, message: 'Vendor marked as fraud' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to mark fraud' });
+  }
+});
+
 
 app.patch('/users/role/:id', async (req, res) => {
   try {
