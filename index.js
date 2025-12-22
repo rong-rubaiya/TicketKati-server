@@ -629,5 +629,4 @@ run().catch(console.dir);
 // Test route
 app.get('/', (req, res) => res.send('Server is running'));
 
-// Start server
-app.listen(port, () => console.log(`Server listening on port ${port}`));
+
